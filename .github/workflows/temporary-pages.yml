@@ -1,0 +1,65 @@
+name: Temporary proposal
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '17 14 1 12 *'
+    - cron: '13,43 15-17 1 12 *'
+    - cron: '19 0,6,12 2 12 *'
+
+permissions: {}
+
+concurrency:
+  group: temporary-proposal-pages
+  cancel-in-progress: false
+
+jobs:
+  package:
+    runs-on: ubuntu-latest
+    timeout-minutes: 100
+    permissions:
+      contents: write
+    env:
+      EXPIRY_UTC: ${{ vars.EXPIRY_UTC }}
+    steps:
+      - name: Prepare the live proposal or the expiry page
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          TRIGGER: ${{ github.event_name }}
+        run: |
+          set -euo pipefail
+          : "${EXPIRY_UTC:?Set the expiry before running}"
+          deadline=$(date -ud "$EXPIRY_UTC" +%s)
+          remaining=$(( deadline - $(date -u +%s) ))
+          mkdir site
+          if [[ "$TRIGGER" == schedule && "$remaining" -gt 0 ]]; then
+            if (( remaining > 5400 )); then exit 1; fi
+            sleep "$remaining"
+          fi
+          if (( $(date -u +%s) >= deadline )); then
+            printf '%s\n' '<!doctype html><html lang="ja"><meta charset="utf-8"><meta name="robots" content="noindex"><title>公開終了</title><h1>公開は終了しました</h1></html>' > site/404.html
+          else
+            gh release download proposal-upload --pattern roadmap.zip --dir .
+            unzip -q roadmap.zip -d site
+            test -s site/index.html
+          fi
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+          retention-days: 1
+
+  deploy:
+    needs: package
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.pages.outputs.page_url }}
+    steps:
+      - name: Deploy
+        id: pages
+        uses: actions/deploy-pages@v4
